@@ -1,0 +1,13 @@
+*{
+    align-content:center;
+    align-items:center;
+    text-align:center;
+    vertical-align:center;
+    background-color:black;
+    color:white;
+    font-size:22px;
+    font-family: Calibri, serif;
+}
+body{
+    background-color: maroon;
+}
