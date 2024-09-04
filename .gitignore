@@ -15,3 +15,6 @@
 /.idea/phpspec.xml
 /.idea/TestTwo.iml
 /csv_storage
+/composer.lock
+/.idea/vcs.xml
+/.idea/.gitignore

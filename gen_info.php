@@ -37,38 +37,222 @@ $SURNAMES = array(
     "Smith", "Brown", "Rodriguez", "Lopez", "Johnson",
     "Miller", "Garcia", "Hernandez", "Wilson", "Gjoni"
 );
+//number of entities to do per batch when using batched generation
+$ENTRIES_PER_BATCH = 25000;
 ///POST
 //submit for the amount of entries to be generated
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit'])) {
     $numRecords = $_POST["amount"];
-    //check if the amount needed is less than 50 000, if so, just generate that amount and save it to CSV file
-    if($numRecords <= 50000){
-        $entries = genEntries($numRecords);
-        saveToCSV($entries);
-        return;
-    }
-    $numCycles = (int) ($numRecords / 50000);
-    for($i = 0; $i < $numRecords-50000; $i+=50000){
-        $entries = genEntries(50000);
-        saveToCSV($entries);
-    }
-    $remainder = $numRecords % 50000;
-    $entries = genEntries($remainder);
-    saveToCSV($entries);
+    generateAndSaveCSV($numRecords);
 }
 ///FUNCTIONS
-//save the given entries to a CSV file and store it in the user's downloads folder
-function saveToCSV($entries){
-    //get the user's Downloads folder path
+//main function to generate and save CSV file
+function generateAndSaveCSV($totalNumEntries){
+    global $ENTRIES_PER_BATCH;
+    //calculate how many batches are needed
+    $numBatches = (int) ($totalNumEntries / $ENTRIES_PER_BATCH);
+    //if less than or precisely one batch is needed, do everything in one batch
+    if($numBatches <= 1){
+        $entries = genEntries($totalNumEntries);
+        saveToCSV($entries);
+    }
+    ///if the code came this far, more than one batch is needed
+    //create the array that will store the temporary CSV output files
+    $outputFiles = array();
+    //calculate how many years per batch
+    $yearsPerBatch = (int) (300 / $numBatches);
+    //get the current year
+    $now = new DateTime();
+    $currentYear = $now->format('Y');
+    //generate batches of entries and save them to separate .csv files, starting with output_0.csv - specify the year range that is to be used and the starting index of ID
+    for($i = 0; $i < $numBatches; $i++){
+        $startYear = $currentYear - ($yearsPerBatch * ($i+1));
+        $endYear = $currentYear - ($yearsPerBatch * $i);
+        $entries = genEntriesForYears($ENTRIES_PER_BATCH, $startYear, $endYear, (($i * $ENTRIES_PER_BATCH)+1));
+        $outputFiles[] = saveToCSVBatched($entries, $i);
+        echo "Batch ".($i+1)." of ".($numBatches+1)." saved to CSV."."<br>";
+    }
+    //save the last batch of entries
+    $lastBatchAmount = $totalNumEntries % $ENTRIES_PER_BATCH;
+    $startYear = $currentYear - ($yearsPerBatch * ($numBatches+1));
+    $endYear = $currentYear - ($yearsPerBatch * $numBatches);
+    $entries = genEntriesForYears($lastBatchAmount, $startYear, $endYear, (($numBatches * $ENTRIES_PER_BATCH)+1));
+    $outputFiles[] = saveToCSVBatched($entries, $numBatches);
+    echo "Final batch of entries saved to CSV file."."<br>"."Combining temp CSV files into main output.csv file."."<br>";
+    combineFiles($outputFiles);
+    echo "Finished combining files. output.csv should be ready now."."<br>";
+}
+//generate specified amount of entries for a specified range of years and a specified starting index for ID
+function genEntriesForYears($amount, $startYear, $endYear, $startIndex):array{
+    global $NAMES;
+    global $SURNAMES;
+    $entries = [];
+    $count = 0;
+    while($count < $amount){
+        $randomIndex = array_rand($NAMES);
+        $name = $NAMES[$randomIndex];
+        $initial = substr($name, 0, 1);
+        $randomIndex = array_rand($SURNAMES);
+        $surname = $SURNAMES[$randomIndex];
+        $dob = genDOBForYears($startYear, $endYear);
+        $age = calcAge($dob);
+        $newId = $startIndex + $count;
+        $entry = [
+            "ID" => $newId,
+            "name" => $name,
+            "surname" => $surname,
+            "initial" => $initial,
+            "age" => $age,
+            "dob" => $dob
+        ];
+        if(!in_array($entry, $entries)) $entries[$count++] = $entry;
+    }
+    return $entries;
+}
+//save entries to CSV file - this function appends at the bottom of the CSV file
+function saveToCSVBatched($entries, $fileSuffix):string{
+    //get the user's Downloads folder path and specify CSV file path
     $downloadsFolder = getenv("HOME")."/Downloads";
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
         $downloadsFolder = getenv("USERPROFILE")."\\Downloads";
     }
-    //set the file path
+    $filePath = $downloadsFolder . DIRECTORY_SEPARATOR . "output_".$fileSuffix.".csv";
+    try{
+        //open the file and check that it is opened
+        $file = fopen($filePath, 'w');  //'w' mode will overwrite any existing file || 'a' will open in append mode
+        if ($file === false) {
+            echo "Error: Unable to open file for appending."."<br>";
+            return false;
+        }
+        //write the entries
+        foreach($entries as $entry){
+            $dobString = $entry["dob"]->format('d/m/Y');
+            fputcsv($file, [$entry["ID"], $entry["name"], $entry["surname"], $entry["initial"], $entry["age"], $dobString]);
+        }
+        fclose($file);
+        return $filePath;
+    }catch (Exception $e){
+        echo "Error: Unable to open file for appending."."<br>";
+        return false;
+    }
+}
+//combines all the temp CSV files into the main output.csv file using 'rb' - returns true on success, otherwise false
+function combineFiles($tempFiles):bool{
+    //get the user's Downloads folder path and specify CSV file path
+    $downloadsFolder = getenv("HOME")."/Downloads";
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        $downloadsFolder = getenv("USERPROFILE")."\\Downloads";
+    }
+    $outputPath = $downloadsFolder . DIRECTORY_SEPARATOR . "output.csv";
+    if(file_exists($outputPath)) unlink($outputPath);
+    $outputHandle = fopen($outputPath, 'w');
+    if ($outputHandle === false) {
+        echo "Failed to open output.csv for writing."."<br>";
+        return false;
+    }
+    //set the header
+    fputcsv($outputHandle, ["ID", "Name", "Surname", "Initial", "Age", "Date of Birth"]);
+    //open each file in read binary mode and copy it's contents over to the main file
+    foreach ($tempFiles as $file) {
+        $inputHandle = fopen($file, 'rb');
+        if ($inputHandle === false) {
+            echo "Failed to open file for reading: ".$file."<br>";
+            return false;
+        }
+        //append the content of the current file to the output file
+        while (!feof($inputHandle)) {
+            //read a chunk of data from the file
+            $chunk = fread($inputHandle, 1024 * 1024); //can adjust chunk size as needed
+            //write the chunk to the output file
+            fwrite($outputHandle, $chunk);
+        }
+        //close the input file
+        fclose($inputHandle);
+    }
+    //close the output file
+    fclose($outputHandle);
+    echo "Successfully combined CSV files into output.CSV"."<br>";
+    //delete the temp files
+    foreach ($tempFiles as $file) {
+        if(file_exists($file)) unlink($file);
+    }
+    return true;
+}
+//generate a dob within the specified years
+function genDOBForYears($startYear, $endYear):DateTime{
+    $year = rand($startYear, $endYear);
+    $month = rand(1, 12);
+    $day = 0;
+    switch ($month){
+        case 12:
+        case 10:
+        case 8:
+        case 7:
+        case 5:
+        case 3:
+        case 1:
+            $day = rand(1, 31);
+            break;
+        case 2:
+            if($year % 400 == 0){
+                $day = rand(1, 29);
+            }else if($year % 100 != 0 && $year % 4 == 0){
+                $day = rand(1, 29);
+            }else{
+                $day = rand(1, 28);
+            }
+            break;
+        case 11:
+        case 9:
+        case 6:
+        case 4:
+            $day = rand(1, 30);
+            break;
+    }
+    return new DateTime($day.'-'.$month.'-'.$year);
+}
+//calculates the age of a person with the specified date of birth
+function calcAge($dob):int{
+    $now = new DateTime();
+    $age = $now->diff($dob);
+    return $age->y;
+}
+//generates specified amount of entries
+function genEntries($amount):array{
+    global $NAMES;
+    global $SURNAMES;
+    $entries = [];
+    $count = 0;
+    while($count < $amount){
+        $randomIndex = array_rand($NAMES);
+        $name = $NAMES[$randomIndex];
+        $initial = substr($name, 0, 1);
+        $randomIndex = array_rand($SURNAMES);
+        $surname = $SURNAMES[$randomIndex];
+        $dob = genDOB();
+        $age = calcAge($dob);
+        $entry = [
+            "name" => $name,
+            "surname" => $surname,
+            "initial" => $initial,
+            "age" => $age,
+            "dob" => $dob
+        ];
+        if(!in_array($entry, $entries)) $entries[$count++] = $entry;
+    }
+    return $entries;
+}
+//save the given entries to a CSV file and store it in the user's downloads folder - this function overwrites the current data in the CSV
+function saveToCSV($entries){
+    //get the user's Downloads folder path and specify CSV file path
+    $downloadsFolder = getenv("HOME")."/Downloads";
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        $downloadsFolder = getenv("USERPROFILE")."\\Downloads";
+    }
     $filePath = $downloadsFolder . DIRECTORY_SEPARATOR . "output.csv";
     try{
         //open the file and check that it is opened
-        $file = fopen($filePath, 'w');  //'w' mode will overwrite any existing file
+        $file = fopen($filePath, 'w');  //'w' mode will overwrite any existing file || 'a' will open in append mode
         if ($file === false) {
             echo "Error: Unable to open file for writing."."<br>";
             return;
@@ -78,7 +262,7 @@ function saveToCSV($entries){
         //write the entries
         $counter = 1;
         foreach($entries as $entry){
-            $dobString = $entry["dob"]->format("d/m/Y");
+            $dobString = $entry["dob"]->format('d/m/Y');
             fputcsv($file, [$counter++, $entry["name"], $entry["surname"], $entry["initial"], $entry["age"], $dobString]);
         }
         fclose($file);
@@ -87,12 +271,6 @@ function saveToCSV($entries){
         echo "Error: Unable to open file for writing."."<br>";
         return;
     }
-}
-//calculates the age of a person with the specified date of birth
-function calcAge($dob):int{
-    $now = new DateTime();
-    $age = $now->diff($dob);
-    return $age->y;
 }
 //generates a random date of birth within the last 151 years
 function genDOB():DateTime{
@@ -128,31 +306,6 @@ function genDOB():DateTime{
             break;
     }
     return new DateTime($day.'-'.$month.'-'.$year);
-}
-//generates an amount of entries, the amount being based on user input
-function genEntries($amount):array{
-    global $NAMES;
-    global $SURNAMES;
-    $entries = [];
-    $count = 0;
-    while($count < $amount){
-        $randomIndex = array_rand($NAMES);
-        $name = $NAMES[$randomIndex];
-        $initial = substr($name, 0, 1);
-        $randomIndex = array_rand($SURNAMES);
-        $surname = $SURNAMES[$randomIndex];
-        $dob = genDOB();
-        $age = calcAge($dob);
-        $entry = [
-            "name" => $name,
-            "surname" => $surname,
-            "initial" => $initial,
-            "age" => $age,
-            "dob" => $dob->format('d/m/Y')
-        ];
-        if(!in_array($entry, $entries)) $entries[$count++] = $entry;
-    }
-    return $entries;
 }
 ?>
 
