@@ -5,5 +5,5 @@ To run:
 Pre-requisites:
 - This project was coded in PHP v7.4.9.
 - Have PHP installed and set up to be able to use SQLite3.
-- Make sure that your maximum file upload size, in the php.ini file, is set to something big enough to accomodate 1 000 000 line csv file.
+- Make sure that your "upload_max_filesize", in the php.ini file, is set to something big enough to accomodate 1 000 001 line csv file.
 - It is a good idea to increase the "memory_limit" variable, in the php.ini file under "Resource Limits", to "256M" or "512M" to allow for more memory usage with large scripts.
