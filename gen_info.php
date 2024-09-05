@@ -55,8 +55,9 @@ function generateAndSaveCSV($totalNumEntries){
     if($numBatches <= 1){
         $entries = genEntries($totalNumEntries);
         saveToCSV($entries);
+        return;
     }
-    ///if the code came this far, more than one batch is needed
+    //if the code came this far, more than one batch is needed
     //create the array that will store the temporary CSV output files
     $outputFiles = array();
     //calculate how many years per batch
@@ -151,8 +152,8 @@ function combineFiles($tempFiles):bool{
         return false;
     }
     //set the header
-    fputcsv($outputHandle, ["ID", "Name", "Surname", "Initial", "Age", "Date of Birth"]);
-    //open each file in read binary mode and copy it's contents over to the main file
+    fputcsv($outputHandle, ["ID", "Name", "Surname", "Initial", "Age", "Date_Of_Birth"]);
+    //open each file in read binary mode and copy its contents over to the main file
     foreach ($tempFiles as $file) {
         $inputHandle = fopen($file, 'rb');
         if ($inputHandle === false) {
@@ -258,7 +259,7 @@ function saveToCSV($entries){
             return;
         }
         //set the header
-        fputcsv($file, ["ID", "Name", "Surname", "Initial", "Age", "Date of Birth"]);
+        fputcsv($file, ["ID", "Name", "Surname", "Initial", "Age", "Date_Of_Birth"]);
         //write the entries
         $counter = 1;
         foreach($entries as $entry){
@@ -345,14 +346,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['saveToSQLite'])) {
         if ($fileExtension === 'csv') {
             //set up the database
             $pdo = setupDB();
-            //check how many files are in the DB
-            $numFilesInDB = howManyFiles($pdo);
-            echo "There are ".$numFilesInDB." files in the database"."<br>"."Deleting all records now"."<br>";
-            //delete all the records in the DB
-            clearDB($pdo);
-            //check how many files are in the DB
-            $numFilesInDB = howManyFiles($pdo);
-            echo "There are ".$numFilesInDB." files in the database"."<br>";
             if ($pdo) {
                 //save CSV to SQLite DB
                 saveCSVToSQLite($fileTmpPath, $pdo);
@@ -370,17 +363,21 @@ function setupDB():PDO{
         $pdo = new PDO('sqlite:' . $dbPath);
         //set error mode to exceptions
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        //create 'csv_import' table if it does not exist
-        //should I auto increment, or should I rather just use the generated ID?
+        //delete the 'csv_import table if it exists
+        $sql = "DROP TABLE IF EXISTS csv_import";
+        $pdo->exec($sql);
+        //create 'csv_import' table
         $sql = "CREATE TABLE IF NOT EXISTS csv_import (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     surname TEXT NOT NULL,
                     initial TEXT NOT NULL,
                     age INTEGER NOT NULL,
-                    dob TEXT NOT NULL
+                    date_of_birth TEXT NOT NULL
                 )";
         $pdo->exec($sql);
+        //clear the db just in case
+        clearDB($pdo);
         echo "Database setup successful and 'csv_import' table is ready"."<br>";
         return $pdo;
     } catch (PDOException $e) {
@@ -396,12 +393,12 @@ function saveCSVToSQLite($csvFilePath, $pdo){
         echo "Before attempting to insert new data, there are ".$filesAtStart." files in the database"."<br>";
         //open CSV file for reading
         if (($csvFile = fopen($csvFilePath, 'r')) !== false) {
-            $header = fgetcsv($csvFile, 50, ",");
+            $header = fgetcsv($csvFile, 100, ",");
             //create SQL insert statement
-            $sql = "INSERT INTO csv_import (id, name, surname, initial, age, dob) VALUES (:id, :name, :surname, :initial, :age, :dob)";
+            $sql = "INSERT INTO csv_import (id, name, surname, initial, age, date_of_birth) VALUES (:id, :name, :surname, :initial, :age, :dob)";
             $stmt = $pdo->prepare($sql);
             //loop through each row of the CSV file
-            while (($data = fgetcsv($csvFile, 50, ",")) !== false) {
+            while (($data = fgetcsv($csvFile, 100, ",")) !== false) {
                 //save CSV data to variables
                 $id = (int)$data[0];
                 $name = $data[1];
@@ -415,7 +412,7 @@ function saveCSVToSQLite($csvFilePath, $pdo){
                 $stmt->bindParam(':surname', $surname);
                 $stmt->bindParam(':initial', $initial);
                 $stmt->bindParam(':age', $age);
-                $stmt->bindParam(':dob', $dob);
+                $stmt->bindParam(':date_of_birth', $dob);
                 $stmt->execute();
                 //display how many files have been uploaded every 10 000
                 if($id % 10000 == 0) echo "Uploaded data entry: ".$id."<br>";
