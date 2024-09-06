@@ -393,9 +393,10 @@ function saveCSVToSQLite($csvFilePath, $pdo){
         echo "Before attempting to insert new data, there are ".$filesAtStart." files in the database"."<br>";
         //open CSV file for reading
         if (($csvFile = fopen($csvFilePath, 'r')) !== false) {
+            //take out the header
             $header = fgetcsv($csvFile, 100, ",");
             //create SQL insert statement
-            $sql = "INSERT INTO csv_import (id, name, surname, initial, age, date_of_birth) VALUES (:id, :name, :surname, :initial, :age, :dob)";
+            $sql = "INSERT INTO csv_import (id, name, surname, initial, age, date_of_birth) VALUES (:id, :name, :surname, :initial, :age, :date_of_birth)";
             $stmt = $pdo->prepare($sql);
             //loop through each row of the CSV file
             while (($data = fgetcsv($csvFile, 100, ",")) !== false) {
